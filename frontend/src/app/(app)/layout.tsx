@@ -1,19 +1,27 @@
-import AppSidebar from "@/components/app-sidebar";
-import Topbar from "@/components/topbar";
+import { connection } from "next/server";
 
-export default function AppLayout({
+import AppShell from "@/components/app-shell";
+import { getCurrentUserContext } from "@/lib/auth/current-user";
+
+export const instant = false;
+
+export default async function AppLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  return (
-    <div className="flex min-h-screen bg-slate-950 text-white">
-      <AppSidebar />
+  await connection();
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar />
-        <main className="flex-1 bg-slate-950 px-6 py-6">{children}</main>
-      </div>
-    </div>
+  const currentUser = await getCurrentUserContext();
+
+  return (
+    <AppShell
+      organizationName={currentUser.organizationName}
+      fullName={currentUser.fullName}
+      email={currentUser.email}
+      role={currentUser.role}
+    >
+      {children}
+    </AppShell>
   );
 }
