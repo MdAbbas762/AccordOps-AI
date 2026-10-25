@@ -5,15 +5,14 @@ from app.api.router import api_router
 from app.core.config import settings
 from app.core.logging import configure_logging
 
-
 configure_logging()
 
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
     description=(
-        "Backend API for AccordOps AI contract intelligence "
-        "and operational control."
+        "Python-first contract operations API for document intelligence, "
+        "human-reviewed controls, AI investigation and n8n automation."
     ),
 )
 
@@ -25,10 +24,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(
-    api_router,
-    prefix=settings.api_v1_prefix,
-)
+app.include_router(api_router, prefix=settings.api_v1_prefix)
 
 
 @app.get("/", tags=["System"])
