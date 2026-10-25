@@ -1,0 +1,248 @@
+{
+  "name": "AccordOps — Approved Remediation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "accordops-approved-remediation",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "approval-webhook",
+      "name": "Approval Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "accordops-approved-remediation"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const req = $input.first().json;\nconst secret = req.headers?.['x-accordops-secret'] ?? req.headers?.['X-AccordOps-Secret'];\nif (!secret) throw new Error('Missing AccordOps webhook secret');\nconst body = req.body ?? req;\nfor (const key of ['action_id', 'organization_id', 'approval_id', 'exception_id', 'requested_action']) {\n  if (!body[key]) throw new Error(`Missing required field: ${key}`);\n}\nreturn [{\n  json: {\n    action_id: String(body.action_id),\n    organization_id: String(body.organization_id),\n    approval_id: String(body.approval_id),\n    exception_id: String(body.exception_id),\n    action_type: String(body.action_type ?? 'operational_task'),\n    requested_action: String(body.requested_action),\n    approved_by: String(body.approved_by ?? 'AccordOps reviewer'),\n    accordops_secret: String(secret),\n  },\n}];"
+      },
+      "id": "normalize-action",
+      "name": "Validate Approved Action",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'http://host.docker.internal:8000/api/v1/automation/actions/' + $json.action_id + '/context?organization_id=' + $json.organization_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-AccordOps-Secret",
+              "value": "={{ $json.accordops_secret }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-action",
+      "name": "Verify Action Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const request = $('Validate Approved Action').first().json;\nconst action = $input.first().json;\nconst valid = action.status === 'queued' && action.approval_id === request.approval_id;\nreturn [{ json: { ...request, valid, verified_status: action.status } }];"
+      },
+      "id": "verify-approval",
+      "name": "Verify Human Approval",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "approval-valid",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "approved-if",
+      "name": "Approval Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const item = $input.first().json;\nreturn [{\n  json: {\n    ...item,\n    workflow_name: 'AccordOps — Approved Remediation',\n    execution_summary: `Created controlled remediation work item: ${item.requested_action}`,\n    completed_at: new Date().toISOString(),\n  },\n}];"
+      },
+      "id": "prepare-remediation",
+      "name": "Prepare Remediation Work Item",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://host.docker.internal:8000/api/v1/automation/actions/' + $json.action_id + '/complete' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-AccordOps-Secret",
+              "value": "={{ $json.accordops_secret }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { organization_id: $json.organization_id, status: 'succeeded', workflow_name: $json.workflow_name, execution_summary: $json.execution_summary, response_payload: { approved_by: $json.approved_by, action_type: $json.action_type, completed_at: $json.completed_at, n8n_execution_id: $execution.id } } }}",
+        "options": {}
+      },
+      "id": "complete-action",
+      "name": "Report Execution to AccordOps",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{ json: { status: 'rejected', reason: 'Action context is not queued or no longer matches the approved request.' } }];"
+      },
+      "id": "reject-action",
+      "name": "Reject Invalid Execution",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "Approval Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Approved Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Approved Action": {
+      "main": [
+        [
+          {
+            "node": "Verify Action Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Action Context": {
+      "main": [
+        [
+          {
+            "node": "Verify Human Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Human Approval": {
+      "main": [
+        [
+          {
+            "node": "Approval Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approval Valid?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Remediation Work Item",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject Invalid Execution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Remediation Work Item": {
+      "main": [
+        [
+          {
+            "node": "Report Execution to AccordOps",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "versionId": "22222222-2222-4222-8222-222222222222",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

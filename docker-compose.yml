@@ -5,10 +5,13 @@ services:
     restart: unless-stopped
     ports:
       - "5678:5678"
+    env_file:
+      - ./n8n/.env
     environment:
       - GENERIC_TIMEZONE=Asia/Karachi
       - TZ=Asia/Karachi
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
     volumes:
       - n8n_data:/home/node/.n8n
 

@@ -25,6 +25,7 @@ logs/
 Thumbs.db
 
 # Test / coverage
+.pytest_cache/
 .coverage
 htmlcov/
 coverage/
@@ -35,3 +36,6 @@ coverage/
 
 # Docker/local runtime
 docker-data/
+
+n8n/.env
+*.local-backup

@@ -1,0 +1,305 @@
+{
+  "name": "AccordOps — Operational Evidence Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "accordops-evidence-monitor",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "evidence-webhook",
+      "name": "Evidence Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "accordops-evidence-monitor"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const req = $input.first().json;\nconst secret = req.headers?.['x-accordops-secret'] ?? req.headers?.['X-AccordOps-Secret'];\nif (!secret) throw new Error('Missing AccordOps webhook secret');\nconst body = req.body ?? req;\nfor (const key of ['organization_id', 'obligation_id', 'observed_value']) {\n  if (!body[key]) throw new Error(`Missing required field: ${key}`);\n}\nreturn [{\n  json: {\n    organization_id: String(body.organization_id),\n    obligation_id: String(body.obligation_id),\n    observed_value: String(body.observed_value).trim(),\n    evidence_note: body.evidence_note ? String(body.evidence_note).trim() : null,\n    source: String(body.source ?? 'n8n'),\n    accordops_secret: String(secret),\n  },\n}];"
+      },
+      "id": "normalize-evidence",
+      "name": "Validate & Normalize Evidence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'http://host.docker.internal:8000/api/v1/automation/obligations/' + $json.obligation_id + '/context?organization_id=' + $json.organization_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-AccordOps-Secret",
+              "value": "={{ $json.accordops_secret }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-control",
+      "name": "Get Approved Control",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const evidence = $('Validate & Normalize Evidence').first().json;\nconst control = $input.first().json;\nconst prompt = [\n  'You are AccordOps AI evaluating operational evidence against an approved contract control.',\n  'Return ONLY valid JSON with keys: compliant (boolean), finding (string), recommended_action (string), confidence (number 0..1).',\n  'Be conservative. Never invent missing evidence.',\n  `Contract: ${control.contract_title}`,\n  `Control: ${control.obligation_title}`,\n  `Normalized requirement: ${control.obligation_description}`,\n  `Source clause: ${control.source_clause ?? 'Not available'}`,\n  `Rule config: ${JSON.stringify(control.rule_config ?? {})}`,\n  `Observed value: ${evidence.observed_value}`,\n  `Evidence note: ${evidence.evidence_note ?? 'None'}`,\n].join('\\n');\nreturn [{ json: { ...evidence, control, prompt } }];"
+      },
+      "id": "prepare-ai",
+      "name": "Prepare AI Evaluation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { contents: [{ parts: [{ text: $json.prompt }] }], generationConfig: { temperature: 0.1, responseMimeType: 'application/json' } } }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "gemini-evaluation",
+      "name": "Gemini Compliance Evaluation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const evidence = $('Validate & Normalize Evidence').first().json;\nconst response = $input.first().json;\nconst raw = response.candidates?.[0]?.content?.parts?.[0]?.text;\nif (!raw) throw new Error('Gemini returned no structured evaluation');\nlet parsed;\ntry {\n  parsed = JSON.parse(raw);\n} catch {\n  throw new Error('Gemini response was not valid JSON');\n}\nif (typeof parsed.compliant !== 'boolean') {\n  throw new Error('Gemini evaluation is missing compliant boolean');\n}\nconst confidence = Math.max(0, Math.min(1, Number(parsed.confidence ?? 0.65)));\nreturn [{\n  json: {\n    organization_id: evidence.organization_id,\n    obligation_id: evidence.obligation_id,\n    source: 'n8n',\n    observed_value: evidence.observed_value,\n    evidence_note: evidence.evidence_note,\n    compliant: parsed.compliant,\n    finding: String(parsed.finding ?? 'Evidence evaluated.'),\n    recommended_action: String(parsed.recommended_action ?? 'Record the result for human review.'),\n    confidence,\n    provider: 'gemini',\n    model: 'gemini-3.5-flash-lite',\n    accordops_secret: evidence.accordops_secret,\n    raw_evaluation: { ...parsed, n8n_execution_id: $execution.id },\n  },\n}];"
+      },
+      "id": "normalize-ai",
+      "name": "Normalize AI Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "compliance-check",
+              "leftValue": "={{ $json.compliant }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "compliant-if",
+      "name": "Compliant?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/api/v1/automation/evaluations/record",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-AccordOps-Secret",
+              "value": "={{ $json.accordops_secret }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { organization_id: $json.organization_id, obligation_id: $json.obligation_id, source: $json.source, observed_value: $json.observed_value, evidence_note: $json.evidence_note, compliant: $json.compliant, finding: $json.finding, recommended_action: $json.recommended_action, confidence: $json.confidence, provider: $json.provider, model: $json.model, raw_evaluation: $json.raw_evaluation } }}",
+        "options": {}
+      },
+      "id": "record-compliant",
+      "name": "Record Compliant Evidence",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1690,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/api/v1/automation/evaluations/record",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-AccordOps-Secret",
+              "value": "={{ $json.accordops_secret }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { organization_id: $json.organization_id, obligation_id: $json.obligation_id, source: $json.source, observed_value: $json.observed_value, evidence_note: $json.evidence_note, compliant: $json.compliant, finding: $json.finding, recommended_action: $json.recommended_action, confidence: $json.confidence, provider: $json.provider, model: $json.model, raw_evaluation: $json.raw_evaluation } }}",
+        "options": {}
+      },
+      "id": "create-exception",
+      "name": "Create Exception & Approval",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1690,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "Evidence Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate & Normalize Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Normalize Evidence": {
+      "main": [
+        [
+          {
+            "node": "Get Approved Control",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Approved Control": {
+      "main": [
+        [
+          {
+            "node": "Prepare AI Evaluation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare AI Evaluation": {
+      "main": [
+        [
+          {
+            "node": "Gemini Compliance Evaluation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Compliance Evaluation": {
+      "main": [
+        [
+          {
+            "node": "Normalize AI Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize AI Result": {
+      "main": [
+        [
+          {
+            "node": "Compliant?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compliant?": {
+      "main": [
+        [
+          {
+            "node": "Record Compliant Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Exception & Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "versionId": "11111111-1111-4111-8111-111111111111",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
