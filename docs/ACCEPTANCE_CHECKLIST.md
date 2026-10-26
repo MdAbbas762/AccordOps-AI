@@ -1,0 +1,22 @@
+# AccordOps V2 Acceptance Checklist
+
+- [ ] `scripts/validate.ps1` passes backend tests, workflow JSON validation, lint and production build.
+- [ ] Root `/` explains product purpose without authentication.
+- [ ] Login/logout works and expired sessions redirect cleanly.
+- [ ] Desktop, laptop and mobile layouts are usable at 100% zoom.
+- [ ] Contract PDF/DOCX upload works and duplicate upload is rejected.
+- [ ] Extraction description differs from source evidence.
+- [ ] Local confidence is clause-specific and never fixed at 62%.
+- [ ] Gemini mode identifies itself as Gemini; local rules identify themselves as local rules.
+- [ ] Obligations page is readable and source evidence is expandable.
+- [ ] Exceptions page never shows a false empty state while loading.
+- [ ] Monitoring form never overflows horizontally.
+- [ ] Operational Evidence Monitor appears and executes in n8n.
+- [ ] Non-compliant evidence creates an exception + approval.
+- [ ] Human approval gates remediation.
+- [ ] Approved Remediation workflow appears and executes in n8n.
+- [ ] Audit Trail shows readable summaries, with raw JSON only under Technical Details.
+- [ ] Operations Status shows live coverage, current attention items and recent monitoring/remediation activity.
+- [ ] Organization displays `Northstar Services`, not `Demo Organization`.
+- [ ] Same AccordOps brand mark appears in sidebar/login/favicon.
+- [ ] Final Git commits are made on top of existing history; no re-init/force push.
