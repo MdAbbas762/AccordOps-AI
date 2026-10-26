@@ -2,19 +2,14 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AccordOps AI",
+  title: {
+    default: "AccordOps AI",
+    template: "%s · AccordOps AI",
+  },
   description:
-    "AI-powered contract intelligence and operational control platform",
+    "Turn contract commitments into monitored operational controls and keep every decision accountable.",
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
-  return (
-    <html lang="en">
-      <body>{children}</body>
-    </html>
-  );
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  return <html lang="en"><body>{children}</body></html>;
 }

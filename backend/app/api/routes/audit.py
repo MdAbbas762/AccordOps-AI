@@ -17,7 +17,7 @@ def _event_presentation(action: str, details: dict) -> tuple[str, str, str, str 
             "completed",
         ),
         "obligations.extracted": (
-            "Contract controls extracted",
+            "Contract obligations extracted",
             f"{details.get('count', 0)} monitorable obligations were identified and queued for review.",
             "ai",
             "completed",
@@ -59,14 +59,14 @@ def _event_presentation(action: str, details: dict) -> tuple[str, str, str, str 
             "rejected",
         ),
         "automation.action_succeeded": (
-            "Automation completed",
-            details.get("summary") or "The approved remediation workflow completed successfully.",
+            "Corrective action completed",
+            details.get("summary") or "The approved corrective action completed successfully.",
             "automation",
             "succeeded",
         ),
         "automation.action_failed": (
-            "Automation failed",
-            details.get("summary") or "The approved remediation workflow did not complete successfully.",
+            "Corrective action failed",
+            details.get("summary") or "The approved corrective action did not complete successfully.",
             "automation",
             "failed",
         ),
@@ -74,7 +74,7 @@ def _event_presentation(action: str, details: dict) -> tuple[str, str, str, str 
     if action in mapping:
         return mapping[action]
     readable = action.replace(".", " ").replace("_", " ").strip().title()
-    return readable, "Operational event recorded by AccordOps.", "system", None
+    return readable, "Workspace event recorded.", "system", None
 
 
 @router.get("/audit", response_model=list[AuditItem])

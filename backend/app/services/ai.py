@@ -1,4 +1,5 @@
 import re
+from difflib import SequenceMatcher
 from functools import lru_cache
 from typing import Literal
 
@@ -59,71 +60,149 @@ def calculate_extraction_confidence(
     responsible_party: str | None,
     source_page: int | None,
     rule_config: dict,
+    obligation_type: str | None = None,
 ) -> tuple[float, list[str]]:
-    """Calculate extraction quality from observable clause/rule evidence, not model self-rating."""
+    """Score extraction quality from observable evidence and rule grounding.
+
+    Confidence is deterministic and based on clause clarity, monitoring-rule
+    completeness, and how well structured fields remain grounded in the source.
+    It does not use a fixed model default or manufacture uniqueness between rows.
+    """
 
     source = (source_clause or description or "").strip()
     lowered = source.lower()
-    score = 0.52
+    score = 0.50
     factors: list[str] = []
 
     if source_clause:
-        score += 0.04
+        score += 0.035
         factors.append("source evidence retained")
+    else:
+        score -= 0.07
+
+    explicit_party = bool(PARTY_PATTERN.search(source))
     if MODAL_PATTERN.search(source):
-        score += 0.07
+        score += 0.045
         factors.append("explicit obligation language")
-    if responsible_party or PARTY_PATTERN.search(source):
-        score += 0.05
+    if explicit_party:
+        score += 0.04
+        factors.append("responsible party stated in source")
+    elif responsible_party:
+        score += 0.02
         factors.append("responsible party identified")
     if NUMBER_UNIT_PATTERN.search(source):
-        score += 0.08
+        score += 0.055
         factors.append("measurable threshold or deadline")
     if any(term in lowered for term in ACTION_TERMS):
-        score += 0.05
+        score += 0.035
         factors.append("specific operational action")
     if any(term in lowered for term in TRIGGER_TERMS):
-        score += 0.04
+        score += 0.03
         factors.append("clear timing or trigger")
     if source_page:
-        score += 0.02
+        score += 0.01
         factors.append("source location identified")
-    if rule_config.get("metric"):
-        score += 0.025
-        factors.append("monitoring metric identified")
+
+    type_name = (obligation_type or "other").lower()
+    expected_fields: dict[str, tuple[str, ...]] = {
+        "sla": ("metric", "operator", "threshold", "unit", "trigger"),
+        "billing": ("due_days", "unit", "trigger"),
+        "renewal": ("notice_days", "unit", "trigger"),
+        "deliverable": ("cadence", "due_days", "trigger", "metric"),
+        "other": ("metric", "operator", "threshold", "unit", "trigger"),
+    }
+    expected = expected_fields.get(type_name, expected_fields["other"])
+    populated = sum(
+        1
+        for key in expected
+        if rule_config.get(key) is not None and rule_config.get(key) != ""
+    )
+    if populated:
+        completeness = populated / len(expected)
+        score += 0.12 * completeness
+        factors.append("monitoring rule is structured")
+
     if rule_config.get("operator") and rule_config.get("threshold") is not None:
-        score += 0.045
-        factors.append("comparison rule is explicit")
-    elif rule_config.get("threshold") is not None:
         score += 0.02
-        factors.append("threshold identified")
-    if rule_config.get("trigger"):
-        score += 0.025
-        factors.append("trigger identified")
+        factors.append("comparison rule is explicit")
+    if rule_config.get("control_family"):
+        score += 0.01
+        factors.append("control family identified")
     if (
         rule_config.get("cadence")
         or rule_config.get("due_days") is not None
         or rule_config.get("notice_days") is not None
     ):
-        score += 0.03
+        score += 0.01
         factors.append("operational timing normalized")
 
-    normalized_description = re.sub(r"\W+", "", description.lower())
-    normalized_source = re.sub(r"\W+", "", (source_clause or "").lower())
-    if normalized_source and normalized_description and normalized_source != normalized_description:
-        score += 0.015
-        factors.append("normalized interpretation differs from evidence")
+    words = re.findall(r"[A-Za-z0-9%$]+", source)
+    word_count = len(words)
+    if 10 <= word_count <= 22:
+        score += 0.018
+    elif 23 <= word_count <= 40:
+        score += 0.012
+    elif word_count > 70:
+        score -= 0.02
+
+    specificity_markers = re.findall(
+        r"\b(?:priority\s*\d|p\d|security|incident|invoice|availability|uptime|renewal|notice|business day|business days)\b|[%$]",
+        lowered,
+        flags=re.I,
+    )
+    if specificity_markers:
+        score += min(0.02, 0.004 * len(set(specificity_markers)))
+        factors.append("specific operational context")
+
+    normalized_description = re.sub(r"\s+", " ", description.lower()).strip()
+    normalized_source = re.sub(r"\s+", " ", (source_clause or "").lower()).strip()
+    if normalized_source and normalized_description:
+        similarity = SequenceMatcher(None, normalized_source, normalized_description).ratio()
+        if similarity < 0.55:
+            score += 0.018
+            factors.append("normalized interpretation is distinct from evidence")
+        elif similarity < 0.78:
+            score += 0.012
+            factors.append("normalized interpretation is distinct from evidence")
+        elif similarity > 0.97:
+            score -= 0.02
+
+    structured_text = " ".join(
+        str(rule_config.get(key, ""))
+        for key in ("metric", "trigger", "control_family")
+        if rule_config.get(key)
+    )
+    rule_tokens = set(re.findall(r"[a-z0-9]+", structured_text.lower())) - {
+        "time",
+        "management",
+        "control",
+        "service",
+    }
+    source_tokens = set(re.findall(r"[a-z0-9]+", f"{source} {description}".lower()))
+    if rule_tokens:
+        grounding = len(rule_tokens & source_tokens) / len(rule_tokens)
+        if grounding >= 0.55:
+            score += 0.02
+            factors.append("structured rule is strongly grounded")
+        elif grounding >= 0.25:
+            score += 0.01
+            factors.append("structured rule is grounded")
+        elif grounding < 0.10:
+            score -= 0.015
+
+    modal_count = len(MODAL_PATTERN.findall(source))
+    if modal_count > 1:
+        score -= min(0.03, 0.012 * (modal_count - 1))
+        factors.append("compound clause requires interpretation")
 
     if any(term in lowered for term in VAGUE_TERMS):
-        score -= 0.08
+        score -= 0.085
         factors.append("contains subjective language")
-    if len(source) < 35:
-        score -= 0.03
-    if len(source) > 500:
-        score -= 0.03
+    if word_count and word_count < 7:
+        score -= 0.04
 
     unique_factors = list(dict.fromkeys(factors))
-    return round(min(0.96, max(0.58, score)), 2), unique_factors
+    return round(min(0.98, max(0.58, score)), 2), unique_factors
 
 
 def _structured_confidence_for_gemini(item: GeminiObligationCandidate) -> tuple[float, list[str]]:
@@ -133,6 +212,7 @@ def _structured_confidence_for_gemini(item: GeminiObligationCandidate) -> tuple[
         responsible_party=item.responsible_party,
         source_page=item.source_page,
         rule_config=item.rule_config.model_dump(exclude_none=True),
+        obligation_type=item.obligation_type,
     )
 
 
@@ -147,7 +227,7 @@ NUMBER_UNIT_PATTERN = re.compile(
 )
 ACTION_TERMS = (
     "respond", "acknowledge", "restore", "deliver", "provide", "pay", "invoice",
-    "notify", "maintain", "renew", "submit", "complete", "remediate", "report",
+    "notify", "maintain", "renew", "submit", "complete", "remediate", "report", "return",
 )
 TRIGGER_TERMS = (
     "within", "no later than", "at least", "before", "after", "monthly", "annually",

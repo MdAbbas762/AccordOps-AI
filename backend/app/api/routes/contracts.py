@@ -54,6 +54,18 @@ def list_contracts(
     ).data or []
     version_map = {str(row["contract_id"]): row for row in version_rows}
 
+    obligation_rows = (
+        supabase.table("obligations")
+        .select("contract_id")
+        .eq("organization_id", current_user.organization_id)
+        .in_("contract_id", contract_ids)
+        .execute()
+    ).data or []
+    obligation_counts: dict[str, int] = {}
+    for row in obligation_rows:
+        contract_id = str(row["contract_id"])
+        obligation_counts[contract_id] = obligation_counts.get(contract_id, 0) + 1
+
     return [
         ContractSummary(
             id=str(contract["id"]),
@@ -69,6 +81,7 @@ def list_contracts(
             mime_type=version_map.get(str(contract["id"]), {}).get("mime_type"),
             page_count=version_map.get(str(contract["id"]), {}).get("page_count"),
             created_at=contract["created_at"],
+            obligation_count=obligation_counts.get(str(contract["id"]), 0),
         )
         for contract in contracts
     ]
@@ -268,5 +281,6 @@ def upload_contract(
         mime_type=parsed.mime_type,
         page_count=parsed.page_count,
         created_at=contract_row["created_at"],
+        obligation_count=0,
         extracted_characters=len(parsed.text),
     )

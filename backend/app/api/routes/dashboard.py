@@ -32,7 +32,7 @@ def dashboard(current_user: AuthContext = Depends(get_current_user)) -> dict:
 
     recent_exceptions = (
         supabase.table("exceptions")
-        .select("id, title, severity, status, detected_at")
+        .select("id, title, summary, severity, status, detected_at")
         .eq("organization_id", current_user.organization_id)
         .order("detected_at", desc=True)
         .limit(5)

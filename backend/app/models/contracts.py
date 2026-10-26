@@ -17,6 +17,7 @@ class ContractSummary(BaseModel):
     mime_type: str | None = None
     page_count: int | None = None
     created_at: datetime
+    obligation_count: int = 0
 
 
 class ContractUploadResponse(ContractSummary):

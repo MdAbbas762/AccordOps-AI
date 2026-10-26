@@ -3,6 +3,7 @@ from app.services.ai import (
     GeminiObligationCandidate,
     GeminiRuleConfig,
     _structured_confidence_for_gemini,
+    calculate_extraction_confidence,
     extract_obligations,
     local_evaluate_evidence,
 )
@@ -97,3 +98,44 @@ def test_gemini_quality_score_is_computed_from_evidence_not_model_default() -> N
     assert strong_score <= 0.97
     assert softer_score >= 0.58
     assert "comparison rule is explicit" in strong_factors
+
+
+def test_extraction_confidence_does_not_saturate_unrelated_controls() -> None:
+    cases = [
+        calculate_extraction_confidence(
+            source_clause="Provider must acknowledge Priority 1 incidents within 30 minutes of notification.",
+            description="Acknowledge critical incidents within 30 minutes of the initial alert.",
+            responsible_party="Provider",
+            source_page=None,
+            obligation_type="sla",
+            rule_config={"metric": "acknowledgment_time", "operator": "<=", "threshold": 30, "unit": "minutes", "trigger": "Priority 1 incident notification", "control_family": "incident_management"},
+        )[0],
+        calculate_extraction_confidence(
+            source_clause="Provider shall restore Priority 1 service or provide an acceptable workaround within 4 hours.",
+            description="Restore critical service or provide a workaround within four hours.",
+            responsible_party="Provider",
+            source_page=None,
+            obligation_type="sla",
+            rule_config={"metric": "restoration_time", "operator": "<=", "threshold": 4, "unit": "hours", "control_family": "incident_management"},
+        )[0],
+        calculate_extraction_confidence(
+            source_clause="Customer shall pay undisputed invoices within 30 days of receipt.",
+            description="Pay undisputed invoices within 30 days of receipt.",
+            responsible_party="Customer",
+            source_page=None,
+            obligation_type="billing",
+            rule_config={"due_days": 30, "unit": "days", "control_family": "billing"},
+        )[0],
+        calculate_extraction_confidence(
+            source_clause="Provider shall provide service reports promptly and as appropriate.",
+            description="Provide service reports when appropriate.",
+            responsible_party="Provider",
+            source_page=None,
+            obligation_type="deliverable",
+            rule_config={"control_family": "reporting"},
+        )[0],
+    ]
+
+    assert len(set(cases)) >= 3
+    assert max(cases) <= 0.97
+    assert min(cases) >= 0.58

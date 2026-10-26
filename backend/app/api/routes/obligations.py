@@ -70,6 +70,7 @@ def list_obligations(
                 responsible_party=row.get("responsible_party"),
                 source_page=row.get("source_page"),
                 rule_config=rule_config,
+                obligation_type=row.get("obligation_type"),
             )
 
         items.append(
