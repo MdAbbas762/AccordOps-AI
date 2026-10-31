@@ -429,4 +429,5 @@ The repository uses sample/demo contract data for development and portfolio demo
 **Muhammad Abbas**  
 Software Engineer • AI Automation Engineer
 
-[GitHub](https://github.com/MdAbbas762)
+[![GitHub](https://img.shields.io/badge/GitHub-MdAbbas762-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/MdAbbas762)
+[![Email](https://img.shields.io/badge/Email-abbas63891%40gmail.com-D14836?style=for-the-badge&logo=gmail&logoColor=white)](mailto:abbas63891@gmail.com)
